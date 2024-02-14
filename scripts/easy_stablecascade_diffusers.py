@@ -79,7 +79,7 @@ def on_ui_tabs():
                 guidence_scale = gr.Slider(label='CFG', minimum=1, maximum=32, step=0.5, value=4.0)
                 prior_step = gr.Slider(label='Steps(Prior)', minimum=1, maximum=60, step=1, value=20)
                 decoder_steps = gr.Slider(label='Steps(Decoder)', minimum=1, maximum=60, step=1, value=10)
-                batch_size = gr.Slider(label='Batch Size', minimum=1, maximum=8, step=1, value=1)
+                batch_size = gr.Slider(label='Batch Size', minimum=1, maximum=9, step=1, value=1)
                 sampling_seed = gr.Number(label='Seed', value=-1, precision=0)
 
                 generate_button = gr.Button(value="Generate")
@@ -87,8 +87,7 @@ def on_ui_tabs():
                 ctrls = [prompt, negative_prompt, width, height, guidence_scale, prior_step, decoder_steps, sampling_seed, batch_size]
 
             with gr.Column():
-                output_gallery = gr.Gallery(label='Gallery', show_label=False, object_fit='contain',
-                                            visible=True, height=1024, columns=4, type='pil')
+                output_gallery = gr.Gallery(label='Gallery', height=opts.gallery_height, show_label=False, object_fit='contain', visible=True, columns=3, type='pil')
 
         generate_button.click(predict, inputs=ctrls, outputs=[output_gallery])
     return [(stable_cascade_block, "StableCascade", "stable_cascade")]

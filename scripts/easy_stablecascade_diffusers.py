@@ -1,11 +1,20 @@
 import gradio as gr
 import torch
+import json
 from diffusers import StableCascadeDecoderPipeline, StableCascadePriorPipeline
 
-from modules import script_callbacks, infotext_utils, rng, processing
-from modules.ui_components import ResizeHandleRow
-import modules.images as images
+from modules import script_callbacks, images
+from modules.processing import get_fixed_seed
+from modules.rng import create_generator
 from modules.shared import opts
+from modules.ui_components import ResizeHandleRow
+
+# modules/infotext_utils.py
+def quote(text):
+    if ',' not in str(text) and '\n' not in str(text) and ':' not in str(text):
+        return text
+
+    return json.dumps(text, ensure_ascii=False)
 
 # modules/processing.py
 def create_infotext(prompt, negative_prompt, guidence_scale, prior_steps, decoder_steps, seed, width, height):
@@ -19,7 +28,7 @@ def create_infotext(prompt, negative_prompt, guidence_scale, prior_steps, decode
         "RNG": opts.randn_source if opts.randn_source != "GPU" else None
     }
 
-    generation_params_text = ", ".join([k if k == v else f'{k}: {infotext_utils.quote(v)}' for k, v in generation_params.items() if v is not None])
+    generation_params_text = ", ".join([k if k == v else f'{k}: {quote(v)}' for k, v in generation_params.items() if v is not None])
 
     prompt_text = prompt
     negative_prompt_text = f"\nNegative prompt: {negative_prompt}" if negative_prompt else ""
@@ -30,7 +39,7 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     device = "cuda"
     prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", torch_dtype=torch.bfloat16).to(device)
 
-    fixed_seed = processing.get_fixed_seed(seed)
+    fixed_seed = get_fixed_seed(seed)
 
     prior_output = prior(
         prompt=prompt,
@@ -40,7 +49,7 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
         guidance_scale=guidance_scale,
         num_inference_steps=prior_steps,
         num_images_per_prompt=batch_size,
-        generator=rng.create_generator(fixed_seed)
+        generator=create_generator(fixed_seed)
     )
     prior = None
 

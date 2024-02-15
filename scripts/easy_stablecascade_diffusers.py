@@ -1,5 +1,6 @@
 import gradio as gr
 import torch
+import gc
 import json
 from diffusers import StableCascadeDecoderPipeline, StableCascadePriorPipeline
 
@@ -40,7 +41,6 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", torch_dtype=torch.bfloat16).to(device)
 
     fixed_seed = get_fixed_seed(seed)
-
     prior_output = prior(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -51,7 +51,9 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
         num_images_per_prompt=batch_size,
         generator=create_generator(fixed_seed)
     )
-    prior = None
+    del prior
+    gc.collect()
+    torch.cuda.empty_cache()
 
     decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade",  torch_dtype=torch.float16).to(device)
     decoder_output = decoder(
@@ -62,7 +64,9 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
         output_type="pil",
         num_inference_steps=decoder_steps
     ).images
-    decoder = None
+    del decoder
+    gc.collect()
+    torch.cuda.empty_cache()
 
     for image in decoder_output:
         images.save_image(

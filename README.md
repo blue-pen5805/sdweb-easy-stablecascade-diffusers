@@ -1,6 +1,6 @@
 # Stable Cascade in stable-diffusion-webui
 
-Please have someone remake this extension.
+Added Apple support and send to img2img, inpaint and upscale
 
 ## Requirements
 
@@ -8,4 +8,5 @@ Please have someone remake this extension.
 
 ## Screenshots
 
-![](images/ss1.webp)
+![image](https://github.com/benjamin-bertram/sdweb-easy-stablecascade-diffusers/assets/54454305/5ecf069f-9818-46d8-9bf3-5f1539ce5645)
+

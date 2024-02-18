@@ -4,11 +4,13 @@ import gc
 import json
 from diffusers import StableCascadeDecoderPipeline, StableCascadePriorPipeline
 
-from modules import script_callbacks, images
+from modules import script_callbacks, images, shared
 from modules.processing import get_fixed_seed
 from modules.rng import create_generator
 from modules.shared import opts
 from modules.ui_components import ResizeHandleRow
+from modules.ui_components import ToolButton
+import modules.infotext_utils as parameters_copypaste
 
 # modules/infotext_utils.py
 def quote(text):
@@ -37,11 +39,21 @@ def create_infotext(prompt, negative_prompt, guidence_scale, prior_steps, decode
     return f"{prompt_text}{negative_prompt_text}\n{generation_params_text}".strip()
 
 def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps, decoder_steps, seed, batch_size):
-    device = "cuda"
-    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", torch_dtype=torch.bfloat16).to(device)
+
+    from modules import devices
+    shared.device = devices.device
+    device = devices.device
+
+    if device.type == "mps":
+        dtype = torch.float32
+    else: 
+        dtype = torch.bfloat16
+   
+    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", torch_dtype=dtype).to(device)
 
     fixed_seed = get_fixed_seed(seed)
     prior_output = prior(
+        #images=image,
         prompt=prompt,
         negative_prompt=negative_prompt,
         width=width,
@@ -53,11 +65,15 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     )
     del prior
     gc.collect()
-    torch.cuda.empty_cache()
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    else: 
+        torch.cuda.empty_cache()
 
     decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade",  torch_dtype=torch.float16).to(device)
     decoder_output = decoder(
         image_embeddings=prior_output.image_embeddings.half(),
+        #image_embeddings=image,
         prompt=prompt,
         negative_prompt=negative_prompt,
         guidance_scale=0.0,
@@ -66,7 +82,10 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     ).images
     del decoder
     gc.collect()
-    torch.cuda.empty_cache()
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    else: 
+        torch.cuda.empty_cache()
 
     for image in decoder_output:
         images.save_image(
@@ -85,6 +104,8 @@ def on_ui_tabs():
     with gr.Blocks() as stable_cascade_block:
         with ResizeHandleRow():
             with gr.Column():
+                #image = gr.Image(label="Image for img2img", elem_id="img2img_image", show_label=False, source="upload", interactive=True, type="pil", tool="editor", image_mode="RGBA", height=opts.img2img_editor_height)
+                #denoising_strenght = gr.Slider(label='denoise', minimum=0, maximum=1, step=0.05, value=0.8)
                 prompt = gr.Textbox(label='Prompt', placeholder='Enter a prompt here...', default='')
                 negative_prompt = gr.Textbox(label='Negative Prompt', placeholder='')
                 width = gr.Slider(label='Width', minimum=16, maximum=4096, step=8, value=1024)
@@ -100,7 +121,15 @@ def on_ui_tabs():
                 ctrls = [prompt, negative_prompt, width, height, guidence_scale, prior_step, decoder_steps, sampling_seed, batch_size]
 
             with gr.Column():
-                output_gallery = gr.Gallery(label='Gallery', height=opts.gallery_height, show_label=False, object_fit='contain', visible=True, columns=3, type='pil')
+                output_gallery = gr.Gallery(label='Output', height=shared.opts.gallery_height or None, show_label=False, object_fit='contain', visible=True, columns=3, preview=True)
+                
+                with gr.Row():
+                    buttons = parameters_copypaste.create_buttons(["img2img", "inpaint", "extras"])
+
+                for tabname, button in buttons.items():
+                    parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
+                        paste_button=button, tabname=tabname, source_text_component=prompt, source_image_component=output_gallery,
+                    ))
 
         generate_button.click(predict, inputs=ctrls, outputs=[output_gallery])
     return [(stable_cascade_block, "StableCascade", "stable_cascade")]

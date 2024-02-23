@@ -4,11 +4,14 @@ import gc
 import json
 from diffusers import StableCascadeDecoderPipeline, StableCascadePriorPipeline
 
+import concurrent.futures
+
 from modules import script_callbacks, images
 from modules.processing import get_fixed_seed
 from modules.rng import create_generator
 from modules.shared import opts
 from modules.ui_components import ResizeHandleRow
+
 
 # modules/infotext_utils.py
 def quote(text):
@@ -18,14 +21,14 @@ def quote(text):
     return json.dumps(text, ensure_ascii=False)
 
 # modules/processing.py
-def create_infotext(prompt, negative_prompt, guidence_scale, prior_steps, decoder_steps, seed, width, height):
+def create_infotext(prompt, negative_prompt, guidance_scale, prior_steps, decoder_steps, seed, width, height):
     generation_params = {
         "Model": "StableCascade",
         "Size": f"{width}x{height}",
         "Seed": seed,
         "Steps(Prior)": prior_steps,
         "Steps(Decoder)": decoder_steps,
-        "CFG": guidence_scale,
+        "CFG": guidance_scale,
         "RNG": opts.randn_source if opts.randn_source != "GPU" else None
     }
 
@@ -53,9 +56,9 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     )
     del prior
     gc.collect()
-    # torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()  # Uncomment if using GPU
 
-    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade",  torch_dtype=torch.float16).to(device)
+    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade-decoder", torch_dtype=torch.float16).to(device)
     decoder_output = decoder(
         image_embeddings=prior_output.image_embeddings.half(),
         prompt=prompt,
@@ -66,7 +69,7 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
     ).images
     del decoder
     gc.collect()
-    # torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()  # Uncomment if using GPU
 
     for image in decoder_output:
         images.save_image(
@@ -81,6 +84,11 @@ def predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps,
 
     return decoder_output
 
+def predict_wrapper(inputs):
+    # Unpack the inputs for readability
+    prompt, negative_prompt, width, height, guidance_scale, prior_steps, decoder_steps, seed, batch_size = inputs
+    return predict(prompt, negative_prompt, width, height, guidance_scale, prior_steps, decoder_steps, seed, batch_size)
+
 def on_ui_tabs():
     with gr.Blocks() as stable_cascade_block:
         with ResizeHandleRow():
@@ -89,20 +97,30 @@ def on_ui_tabs():
                 negative_prompt = gr.Textbox(label='Negative Prompt', placeholder='')
                 width = gr.Slider(label='Width', minimum=16, maximum=4096, step=8, value=1024)
                 height = gr.Slider(label='Height', minimum=16, maximum=4096, step=8, value=1024)
-                guidence_scale = gr.Slider(label='CFG', minimum=1, maximum=32, step=0.5, value=4.0)
-                prior_step = gr.Slider(label='Steps(Prior)', minimum=1, maximum=60, step=1, value=20)
+                guidance_scale = gr.Slider(label='CFG', minimum=1, maximum=32, step=0.5, value=4.0)
+                prior_steps = gr.Slider(label='Steps(Prior)', minimum=1, maximum=60, step=1, value=20)
                 decoder_steps = gr.Slider(label='Steps(Decoder)', minimum=1, maximum=60, step=1, value=10)
                 batch_size = gr.Slider(label='Batch Size', minimum=1, maximum=9, step=1, value=1)
                 sampling_seed = gr.Number(label='Seed', value=-1, precision=0)
 
                 generate_button = gr.Button(value="Generate")
 
-                ctrls = [prompt, negative_prompt, width, height, guidence_scale, prior_step, decoder_steps, sampling_seed, batch_size]
+                ctrls = [prompt, negative_prompt, width, height, guidance_scale, prior_steps, decoder_steps, sampling_seed, batch_size]
 
             with gr.Column():
                 output_gallery = gr.Gallery(label='Gallery', height=opts.gallery_height, show_label=False, object_fit='contain', visible=True, columns=3, type='pil')
 
-        generate_button.click(predict, inputs=ctrls, outputs=[output_gallery])
+        def call_predict(*args):
+            inputs = list(zip(*args))  # Re-arrange input for threading
+            images = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
+                results = list(executor.map(predict_wrapper, inputs))
+            for result in results:
+                images.extend(result)
+            return [images]
+
+        generate_button.click(call_predict, inputs=ctrls, outputs=[output_gallery])
+
     return [(stable_cascade_block, "StableCascade", "stable_cascade")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
